@@ -114,7 +114,14 @@
   }
   .player-list .name { flex: 1; text-align: left; font-size: 15px; }
   .player-list .tag { font-size: 11px; color: #ffd84a; text-transform: uppercase; letter-spacing: 1px; }
+  .player-list .tag.cpu { color: #8acc6a; }
   .player-list .empty { opacity: 0.4; font-style: italic; }
+  .player-list .remove {
+    cursor: pointer; color: #ff7a5a; font-size: 18px; font-weight: bold;
+    padding: 0 4px; line-height: 1; opacity: 0.7;
+    background: none; border: none;
+  }
+  .player-list .remove:hover { opacity: 1; }
 
   canvas { border: 2px solid #2d5a1e; display: block; background: #2d5a1e; }
   #game { max-width: 100%; height: auto; }
@@ -147,6 +154,9 @@
     <p>Share this code with up to 3 friends.</p>
     <div class="player-list" id="host-players"></div>
     <p class="status" id="host-status">Setting up…</p>
+    <div class="row">
+      <button class="btn" id="btn-add-cpu">+ Add CPU</button>
+    </div>
     <div class="row">
       <button class="btn primary" id="btn-start" disabled>Start Game</button>
       <button class="btn" data-back>Back</button>
@@ -238,31 +248,40 @@ function generateCode() {
   return code;
 }
 
-function renderPlayerList(el, list, mySlot) {
-  if (!list || list.length === 0) {
-    el.innerHTML = '<div class="row-line empty">No players yet</div>';
-    return;
-  }
-  const slotsToShow = MAX_PLAYERS;
+function renderPlayerList(el, list, mySlot, opts) {
+  opts = opts || {};
+  // Build a slot-indexed view so empty slots render as "Waiting…"
+  const bySlot = {};
+  for (const p of list || []) bySlot[p.slot] = p;
   let html = '';
-  for (let i = 0; i < slotsToShow; i++) {
-    const p = list[i];
+  for (let slot = 0; slot < MAX_PLAYERS; slot++) {
+    const p = bySlot[slot];
     if (p) {
       const me = p.slot === mySlot ? '<span class="tag">You</span>' : '';
       const hostTag = p.isHost ? '<span class="tag">Host</span>' : '';
+      const cpuTag = p.isCPU ? '<span class="tag cpu">CPU</span>' : '';
+      const removeBtn = (opts.canRemoveCPU && p.isCPU)
+        ? `<button class="remove" data-remove-slot="${p.slot}" title="Remove CPU">✕</button>`
+        : '';
       html += `<div class="row-line">
         <span class="swatch" style="background:${p.color}"></span>
         <span class="name">${p.name}</span>
-        ${hostTag}${me}
+        ${hostTag}${cpuTag}${me}${removeBtn}
       </div>`;
     } else {
       html += `<div class="row-line empty">
         <span class="swatch" style="background:#333;border-color:#222"></span>
-        <span class="name">Waiting for player…</span>
+        <span class="name">Waiting…</span>
       </div>`;
     }
   }
   el.innerHTML = html;
+  // Wire up remove buttons (host only).
+  if (opts.canRemoveCPU) {
+    el.querySelectorAll('[data-remove-slot]').forEach(btn => {
+      btn.onclick = () => removeCPU(parseInt(btn.dataset.removeSlot, 10));
+    });
+  }
 }
 
 function destroyEverything() {
@@ -299,8 +318,56 @@ document.getElementById('btn-start').onclick = () => {
   broadcastToAll({ type: 'start' });
   enterGame();
 };
+document.getElementById('btn-add-cpu').onclick = addCPU;
 document.getElementById('btn-join-submit').onclick = submitJoin;
 joinCodeEl.addEventListener('keydown', e => { if (e.key === 'Enter') submitJoin(); });
+
+function nextFreeSlot() {
+  const used = new Set(players.map(p => p.slot));
+  for (let s = 0; s < MAX_PLAYERS; s++) if (!used.has(s)) return s;
+  return -1;
+}
+
+let cpuCounter = 0;
+function addCPU() {
+  if (!isHost || players.length >= MAX_PLAYERS) return;
+  const slot = nextFreeSlot();
+  if (slot < 0) return;
+  cpuCounter++;
+  const colorObj = PLAYER_COLORS[slot] || PLAYER_COLORS[PLAYER_COLORS.length - 1];
+  players.push({
+    slot, peerId: 'cpu-' + cpuCounter,
+    color: colorObj.hex, name: 'CPU ' + cpuCounter, isHost: false, isCPU: true,
+  });
+  players.sort((a, b) => a.slot - b.slot);
+  refreshHostUI();
+  broadcastRoster();
+}
+
+function removeCPU(slot) {
+  if (!isHost) return;
+  const before = players.length;
+  players = players.filter(p => !(p.isCPU && p.slot === slot));
+  if (players.length === before) return;
+  refreshHostUI();
+  broadcastRoster();
+}
+
+function refreshHostUI() {
+  renderPlayerList(hostPlayersEl, players, 0, { canRemoveCPU: true });
+  document.getElementById('btn-add-cpu').disabled = players.length >= MAX_PLAYERS;
+  startBtn.disabled = players.length < 2;
+  if (players.length >= 2) {
+    setHostStatus(
+      players.length === MAX_PLAYERS
+        ? 'Lobby full! Press Start when ready.'
+        : `${players.length} of ${MAX_PLAYERS} ready. Press Start or add more.`,
+      'ok'
+    );
+  } else {
+    setHostStatus('Waiting for players to join (or add a CPU)…');
+  }
+}
 
 // ---------- Host ----------
 function startHosting() {
@@ -312,9 +379,10 @@ function startHosting() {
   // Host occupies slot 0.
   players = [{
     slot: 0, peerId: 'self',
-    color: PLAYER_COLORS[0].hex, name: 'Player 1', isHost: true,
+    color: PLAYER_COLORS[0].hex, name: 'Player 1', isHost: true, isCPU: false,
   }];
-  renderPlayerList(hostPlayersEl, players, 0);
+  cpuCounter = 0;
+  refreshHostUI();
   tryClaimCode(0);
 }
 
@@ -325,12 +393,13 @@ function tryClaimCode(attempt) {
   }
   const code = generateCode();
   const peerId = NAMESPACE + code;
-  const p = new Peer(peerId, { debug: 1 });
+  const p = new Peer(peerId, { debug: 2 });
   p.on('open', () => {
     peer = p;
     myCode = code;
     hostCodeEl.textContent = code;
-    setHostStatus('Waiting for players to join…');
+    setHostStatus('Waiting for players to join… (id: ' + peerId + ')');
+    console.log('[host] peer open with id', peerId);
   });
   p.on('connection', incoming => acceptIncoming(incoming));
   p.on('error', err => {
@@ -356,11 +425,8 @@ function acceptIncoming(incoming) {
   conns[incoming.peer] = incoming;
 
   incoming.on('open', () => {
-    // Assign next free slot 1..3 (host is 0).
-    const usedSlots = new Set(players.map(p => p.slot));
-    let slot = 1;
-    while (usedSlots.has(slot)) slot++;
-    if (slot >= MAX_PLAYERS) {
+    const slot = nextFreeSlot();
+    if (slot < 0) {
       try { incoming.send({ type: 'rejected', reason: 'full' }); } catch (e) {}
       try { incoming.close(); } catch (e) {}
       delete conns[incoming.peer];
@@ -369,20 +435,13 @@ function acceptIncoming(incoming) {
     const colorObj = PLAYER_COLORS[slot] || PLAYER_COLORS[PLAYER_COLORS.length - 1];
     const newPlayer = {
       slot, peerId: incoming.peer,
-      color: colorObj.hex, name: 'Player ' + (slot + 1), isHost: false,
+      color: colorObj.hex, name: 'Player ' + (slot + 1), isHost: false, isCPU: false,
     };
     players.push(newPlayer);
     players.sort((a, b) => a.slot - b.slot);
     incoming.send({ type: 'welcome', yourSlot: slot });
     broadcastRoster();
-    renderPlayerList(hostPlayersEl, players, 0);
-    setHostStatus(
-      players.length === MAX_PLAYERS
-        ? 'Lobby full! Press Start when ready.'
-        : `${players.length} of ${MAX_PLAYERS} joined. Press Start when ready (need 2+).`,
-      'ok'
-    );
-    startBtn.disabled = players.length < 2;
+    refreshHostUI();
   });
 
   incoming.on('close', () => removeConnection(incoming.peer));
@@ -397,13 +456,7 @@ function removeConnection(peerId) {
   players = players.filter(p => p.peerId !== peerId);
   if (players.length === before) return;
   broadcastRoster();
-  renderPlayerList(hostPlayersEl, players, 0);
-  if (players.length < 2) {
-    startBtn.disabled = true;
-    setHostStatus('Waiting for players to join…');
-  } else {
-    setHostStatus(`${players.length} of ${MAX_PLAYERS} joined. Press Start when ready.`, 'ok');
-  }
+  refreshHostUI();
 }
 
 function broadcastRoster() {
@@ -426,9 +479,10 @@ function submitJoin() {
   setJoinStatus('Connecting…');
   document.getElementById('btn-join-submit').disabled = true;
 
-  const p = new Peer(undefined, { debug: 1 });
-  p.on('open', () => {
+  const p = new Peer(undefined, { debug: 2 });
+  p.on('open', myId => {
     peer = p;
+    console.log('[join] my anon id is', myId, '— connecting to', NAMESPACE + code);
     const c = p.connect(NAMESPACE + code, { reliable: true });
     let opened = false;
     let timeoutId = setTimeout(() => {
@@ -475,16 +529,22 @@ function submitJoin() {
       backToMenu();
     });
     c.on('error', err => {
+      console.error('[join] conn error', err);
       if (!opened) {
         clearTimeout(timeoutId);
-        setJoinStatus('Could not reach that game. Check the code.', 'error');
+        setJoinStatus('Could not reach that game. (' + ((err && err.type) || 'error') + ')', 'error');
         document.getElementById('btn-join-submit').disabled = false;
         try { p.destroy(); } catch (e) {}
       }
     });
   });
   p.on('error', err => {
-    setJoinStatus('Connection error: ' + ((err && err.type) || 'unknown'), 'error');
+    console.error('[join] peer error', err);
+    if (err && err.type === 'peer-unavailable') {
+      setJoinStatus('No host with that code is online.', 'error');
+    } else {
+      setJoinStatus('Connection error: ' + ((err && err.type) || 'unknown'), 'error');
+    }
     document.getElementById('btn-join-submit').disabled = false;
   });
 }
