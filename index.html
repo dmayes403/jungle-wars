@@ -1091,6 +1091,8 @@ function enterGame() {
     me,
     lastTickTime: performance.now(),
     units: [],
+    projectiles: [],
+    shockwaves: [],
     totemHp: {},
     cpuMana: {},
     cpuTimers: {},
@@ -1151,6 +1153,8 @@ function gameLoop(now) {
   }
 
   updateUnits(dt);
+  updateProjectiles(dt);
+  updateShockwaves(dt);
   updateCPU(dt);
   updateFloaters(dt);
   checkWinCondition();
@@ -1209,9 +1213,13 @@ function drawWorld() {
 
   // Units on top of totems
   if (gameState) {
-    // Sort by Y so lower units draw in front
+    // Shockwaves under units
+    for (const s of gameState.shockwaves) drawShockwave(ctx, s);
+    // Sort units by Y so lower units draw in front
     const sorted = gameState.units.slice().sort((a, b) => a.y - b.y);
     for (const u of sorted) drawUnit(ctx, u);
+    // Projectiles draw on top of units
+    for (const p of gameState.projectiles) drawProjectile(ctx, p);
     // Floating texts last
     drawFloaters(ctx);
   }
@@ -1848,17 +1856,48 @@ function spawnUnit(card, x, y, ownerSlot) {
     icon: card.icon,
     cooldown: 0,
     spawnPulse: 1,
+    attackType: card.attackType || 'melee',
+    range: card.range != null ? card.range : UNIT_ATTACK_RADIUS,
+    attackCooldown: card.attackCooldown != null ? card.attackCooldown : ATTACK_COOLDOWN,
+    aoeRadius: card.aoeRadius || 0,
+    flashTimer: 0, // hit flash, set when this unit takes damage
   });
 }
 
+function spawnProjectile(u, targetUnit, totemSlot) {
+  if (!gameState) return;
+  gameState.projectiles.push({
+    x: u.x, y: u.y,
+    targetUnit: targetUnit || null,
+    totemSlot: (totemSlot != null) ? totemSlot : null,
+    dmg: u.dmg,
+    ownerSlot: u.ownerSlot,
+    color: u.color,
+    speed: 280,
+    angle: 0,
+    life: 2.0,
+  });
+}
+
+function spawnShockwave(x, y, maxRadius) {
+  if (!gameState) return;
+  gameState.shockwaves.push({ x, y, life: 0.32, max: 0.32, maxRadius });
+}
+
+function dealDamage(victim, dmg) {
+  victim.hp -= dmg;
+  victim.flashTimer = 0.18;
+  spawnFloater(victim.x, victim.y - 16, '-' + dmg, '#ffd84a');
+}
+
 function updateUnits(dt) {
-  // Decide each unit's target / attack
   for (const u of gameState.units) {
     if (u.hp <= 0) continue;
     if (u.cooldown > 0) u.cooldown = Math.max(0, u.cooldown - dt);
     if (u.spawnPulse > 0) u.spawnPulse = Math.max(0, u.spawnPulse - dt * 2);
+    if (u.flashTimer > 0) u.flashTimer = Math.max(0, u.flashTimer - dt);
 
-    // Find nearest enemy unit
+    // Find the nearest enemy unit.
     let nearestEnemy = null;
     let nearestDist = Infinity;
     for (const o of gameState.units) {
@@ -1869,18 +1908,17 @@ function updateUnits(dt) {
 
     let target = null;
 
-    // If close enough to attack an enemy unit, do that.
-    if (nearestEnemy && nearestDist <= UNIT_ATTACK_RADIUS) {
+    // Within my own attack range?
+    if (nearestEnemy && nearestDist <= u.range) {
       if (u.cooldown <= 0) {
-        nearestEnemy.hp -= u.dmg;
-        u.cooldown = ATTACK_COOLDOWN;
-        spawnFloater(nearestEnemy.x, nearestEnemy.y - 16, '-' + u.dmg, '#ffd84a');
-        playSwordClash();
+        performUnitAttack(u, nearestEnemy);
+        u.cooldown = u.attackCooldown;
       }
     } else if (nearestEnemy && nearestDist <= UNIT_AGGRO_RADIUS) {
+      // Chase
       target = { x: nearestEnemy.x, y: nearestEnemy.y };
     } else {
-      // Walk toward the nearest *living* enemy totem.
+      // Find nearest living enemy totem and either attack or walk toward it.
       let nt = null, nd = Infinity, ntSlot = null;
       for (const p of players) {
         if (p.slot === u.ownerSlot) continue;
@@ -1890,14 +1928,12 @@ function updateUnits(dt) {
         if (d < nd) { nd = d; nt = pos; ntSlot = p.slot; }
       }
       if (nt) {
-        if (nd <= TOTEM_ATTACK_RADIUS) {
+        // For ranged units we can shoot the totem from far. For melee we must close in.
+        const totemRange = (u.attackType === 'ranged') ? u.range : TOTEM_ATTACK_RADIUS;
+        if (nd <= totemRange) {
           if (u.cooldown <= 0) {
-            const wasAlive = gameState.totemHp[ntSlot] > 0;
-            gameState.totemHp[ntSlot] = Math.max(0, gameState.totemHp[ntSlot] - u.dmg);
-            u.cooldown = ATTACK_COOLDOWN;
-            spawnFloater(nt.x, nt.y - 30, '-' + u.dmg, '#ff7a5a');
-            if (wasAlive && gameState.totemHp[ntSlot] === 0) playTotemDeath();
-            else playTotemHit();
+            performTotemAttack(u, nt, ntSlot);
+            u.cooldown = u.attackCooldown;
           }
         } else {
           target = { x: nt.x, y: nt.y };
@@ -1905,7 +1941,7 @@ function updateUnits(dt) {
       }
     }
 
-    // Move toward target (if any)
+    // Move toward target if needed.
     if (target) {
       const dx = target.x - u.x;
       const dy = target.y - u.y;
@@ -1945,6 +1981,83 @@ function updateUnits(dt) {
   }
   if (deathsThisFrame > 0) playUnitDeath();
   gameState.units = survivors;
+}
+
+function performUnitAttack(u, victim) {
+  if (u.attackType === 'ranged') {
+    spawnProjectile(u, victim, null);
+    return;
+  }
+  if (u.attackType === 'aoe') {
+    // Damage every enemy within aoeRadius of the target (including the target).
+    for (const o of gameState.units) {
+      if (o.ownerSlot === u.ownerSlot || o.hp <= 0) continue;
+      const d = Math.hypot(o.x - victim.x, o.y - victim.y);
+      if (d <= u.aoeRadius) dealDamage(o, u.dmg);
+    }
+    spawnShockwave(victim.x, victim.y, u.aoeRadius);
+    playSwordClash();
+    return;
+  }
+  // melee
+  dealDamage(victim, u.dmg);
+  playSwordClash();
+}
+
+function performTotemAttack(u, totemPos, ntSlot) {
+  if (u.attackType === 'ranged') {
+    spawnProjectile(u, null, ntSlot);
+    return;
+  }
+  // melee or aoe damages the totem directly
+  const wasAlive = gameState.totemHp[ntSlot] > 0;
+  gameState.totemHp[ntSlot] = Math.max(0, gameState.totemHp[ntSlot] - u.dmg);
+  spawnFloater(totemPos.x, totemPos.y - 30, '-' + u.dmg, '#ff7a5a');
+  if (u.attackType === 'aoe') spawnShockwave(totemPos.x, totemPos.y, u.aoeRadius);
+  if (wasAlive && gameState.totemHp[ntSlot] === 0) playTotemDeath();
+  else playTotemHit();
+}
+
+function updateProjectiles(dt) {
+  for (const p of gameState.projectiles) {
+    let tx, ty, hit = null;
+    if (p.targetUnit && p.targetUnit.hp > 0) {
+      tx = p.targetUnit.x; ty = p.targetUnit.y;
+    } else if (p.totemSlot != null && (gameState.totemHp[p.totemSlot] || 0) > 0) {
+      const pos = TOTEM_POSITIONS[p.totemSlot];
+      tx = pos.x; ty = pos.y - 32; // aim at the orb on top
+    } else {
+      // target is gone
+      p.life = 0; continue;
+    }
+    const dx = tx - p.x, dy = ty - p.y;
+    const d = Math.hypot(dx, dy);
+    p.angle = Math.atan2(dy, dx);
+    const v = p.speed * dt;
+    if (d <= v + UNIT_RADIUS) {
+      // Hit!
+      if (p.targetUnit) dealDamage(p.targetUnit, p.dmg);
+      else if (p.totemSlot != null) {
+        const wasAlive = gameState.totemHp[p.totemSlot] > 0;
+        gameState.totemHp[p.totemSlot] = Math.max(0, gameState.totemHp[p.totemSlot] - p.dmg);
+        const pos = TOTEM_POSITIONS[p.totemSlot];
+        spawnFloater(pos.x, pos.y - 30, '-' + p.dmg, '#ff7a5a');
+        if (wasAlive && gameState.totemHp[p.totemSlot] === 0) playTotemDeath();
+        else playTotemHit();
+      }
+      p.life = 0;
+    } else {
+      p.x += (dx / d) * v;
+      p.y += (dy / d) * v;
+    }
+    p.life -= dt;
+  }
+  gameState.projectiles = gameState.projectiles.filter(p => p.life > 0);
+}
+
+function updateShockwaves(dt) {
+  for (const s of gameState.shockwaves) s.life -= dt;
+  gameState.shockwaves = gameState.shockwaves.filter(s => s.life > 0);
 }
 
 function updateCPU(dt) {
@@ -2067,11 +2180,18 @@ function drawUnit(ctx, u) {
   ctx.beginPath();
   ctx.ellipse(u.x, u.y + UNIT_RADIUS - 1, UNIT_RADIUS * 0.9, UNIT_RADIUS * 0.3, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Body
+  // Body — flash white briefly when hit
+  const flash = u.flashTimer || 0;
   ctx.fillStyle = u.color;
   ctx.beginPath();
   ctx.arc(u.x, u.y, UNIT_RADIUS, 0, Math.PI * 2);
   ctx.fill();
+  if (flash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${flash * 4})`;
+    ctx.beginPath();
+    ctx.arc(u.x, u.y, UNIT_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.6;
   ctx.stroke();
@@ -2080,6 +2200,11 @@ function drawUnit(ctx, u) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(u.icon, u.x, u.y + 1);
+  // Tiny ranged-indicator (small bow icon under archers)
+  if (u.attackType === 'ranged') {
+    ctx.font = '8px Arial';
+    ctx.fillText('🏹', u.x, u.y + UNIT_RADIUS + 2);
+  }
   // HP bar above unit
   const barW = 24, barH = 3;
   const pct = Math.max(0, u.hp) / u.maxHp;
@@ -2087,6 +2212,54 @@ function drawUnit(ctx, u) {
   ctx.fillRect(u.x - barW / 2, u.y - UNIT_RADIUS - 8, barW, barH);
   ctx.fillStyle = pct > 0.5 ? '#5acc4a' : (pct > 0.25 ? '#ffd84a' : '#ff5a4a');
   ctx.fillRect(u.x - barW / 2, u.y - UNIT_RADIUS - 8, barW * pct, barH);
+}
+
+function drawProjectile(ctx, p) {
+  const a = p.angle || 0;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(a);
+  // Shaft
+  ctx.strokeStyle = '#3a200a';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(5, 0);
+  ctx.stroke();
+  // Arrowhead
+  ctx.fillStyle = '#bdbdc8';
+  ctx.beginPath();
+  ctx.moveTo(8, 0);
+  ctx.lineTo(2, -2.4);
+  ctx.lineTo(2, 2.4);
+  ctx.closePath();
+  ctx.fill();
+  // Fletching
+  ctx.fillStyle = p.color || '#cc4a4a';
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(-10, -2.5);
+  ctx.lineTo(-10, 2.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawShockwave(ctx, s) {
+  const t = 1 - (s.life / s.max);
+  const r = s.maxRadius * t;
+  const alpha = (1 - t) * 0.9;
+  ctx.strokeStyle = `rgba(255, 200, 100, ${alpha})`;
+  ctx.lineWidth = 4 * (1 - t) + 1;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  // Inner faint ring
+  ctx.strokeStyle = `rgba(255, 240, 200, ${alpha * 0.5})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, r * 0.7, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function drawTotemHpBar(ctx, x, y, hp, maxHp) {
