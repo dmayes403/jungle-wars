@@ -238,14 +238,17 @@ const PLAYER_COLORS = [
   { hex: '#e0c84a', name: 'Snake Yellow' },
 ];
 
-// PeerJS connection options with explicit ICE servers for reliable NAT traversal.
-// openrelay.metered.ca offers free public TURN as a fallback when STUN alone can't connect.
+// PeerJS connection options. We force TURN-relay mode so the connection
+// always goes through a public relay server. This is the most reliable
+// way to make two tabs (or two devices behind any kind of firewall)
+// actually talk to each other. For a low-bandwidth card game the small
+// latency hit is irrelevant.
 const PEER_OPTS = {
   debug: 2,
   config: {
+    iceTransportPolicy: 'relay',
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
       {
         urls: 'turn:openrelay.metered.ca:80',
@@ -254,6 +257,11 @@ const PEER_OPTS = {
       },
       {
         urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
         username: 'openrelayproject',
         credential: 'openrelayproject',
       },
@@ -632,6 +640,17 @@ function submitJoin() {
       setJoinStatus('');
       document.getElementById('btn-join-submit').disabled = false;
     });
+    // Watch ICE state on the underlying RTCPeerConnection so we can see
+    // *why* a connection is or isn't establishing (relay/direct/failed).
+    setTimeout(() => {
+      const pc = c.peerConnection;
+      if (pc) {
+        pc.addEventListener('iceconnectionstatechange', () => {
+          dlog('join: ICE state = ' + pc.iceConnectionState,
+            pc.iceConnectionState === 'failed' ? 'err' : 'info');
+        });
+      }
+    }, 100);
     c.on('data', data => {
       if (!data) return;
       if (data.type === 'rejected') {
