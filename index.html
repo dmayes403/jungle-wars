@@ -365,12 +365,20 @@
     pointer-events: auto; cursor: pointer;
     background: rgba(0,0,0,0.5);
     border: 1px solid rgba(255,255,255,0.2);
-    color: #fff;
-    padding: 4px 10px;
+    padding: 5px 8px;
     border-radius: 4px;
-    font-size: 14px;
-    font-family: Arial;
+    line-height: 0;
   }
+  .game-hud-top .mute-btn:hover .speaker-body { fill: #fff; }
+  .game-hud-top .mute-btn:hover .speaker-wave { stroke: #fff; }
+  /* Classic speaker SVG: rectangular body + triangular cone + two
+     curved sound waves; the red diagonal slash appears when muted. */
+  .speaker-svg { display: block; width: 22px; height: 17px; }
+  .speaker-svg .speaker-body { fill: #f0e8d0; }
+  .speaker-svg .speaker-wave { stroke: #f0e8d0; stroke-width: 1.7; stroke-linecap: round; fill: none; }
+  .speaker-svg .speaker-slash { stroke: #ff5a3a; stroke-width: 2.4; stroke-linecap: round; display: none; }
+  .speaker-svg.muted .speaker-wave { display: none; }
+  .speaker-svg.muted .speaker-slash { display: inline; }
 
   /* Winner screen overlay */
   #winner-overlay {
@@ -538,7 +546,14 @@
       <div class="game-hud-top">
         <span class="you-tag" id="you-tag"></span>
         <span id="game-info"></span>
-        <button class="mute-btn" id="btn-mute" title="Mute sounds">🔊</button>
+        <button class="mute-btn" id="btn-mute" title="Mute sounds">
+          <svg class="speaker-svg" id="speaker-svg" viewBox="0 0 22 18">
+            <path class="speaker-body" d="M1 6 L5 6 L11 1 L11 17 L5 12 L1 12 Z"/>
+            <path class="speaker-wave" d="M13.5 6.2 Q15.8 9 13.5 11.8"/>
+            <path class="speaker-wave" d="M15.8 4 Q19.5 9 15.8 14"/>
+            <line class="speaker-slash" x1="12" y1="3" x2="21" y2="15"/>
+          </svg>
+        </button>
       </div>
       <div class="game-overlay">
         <div class="mana-bar">
@@ -1905,10 +1920,9 @@ function ensureAudio() {
 function setMuted(m) {
   muted = m;
   const btn = document.getElementById('btn-mute');
-  if (btn) {
-    btn.textContent = muted ? '🔇' : '🔊';
-    btn.title = muted ? 'Unmute sounds' : 'Mute sounds';
-  }
+  if (btn) btn.title = muted ? 'Unmute sounds' : 'Mute sounds';
+  const svg = document.getElementById('speaker-svg');
+  if (svg) svg.classList.toggle('muted', muted);
 }
 document.getElementById('btn-mute').onclick = () => setMuted(!muted);
 
