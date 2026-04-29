@@ -245,6 +245,7 @@ function setJoinStatus(text, kind) { setStatus(joinStatusEl, text, kind); }
 let peer = null;
 let isHost = false;
 let myCode = null;
+let gameStarted = false;
 // Host: connections keyed by peerId. Join: single conn to host stored at conns['host'].
 let conns = {};
 // Roster of players (host is always slot 0).
@@ -322,6 +323,7 @@ function destroyEverything() {
   peer = null;
   isHost = false;
   myCode = null;
+  gameStarted = false;
   players = [];
 }
 
@@ -341,9 +343,10 @@ document.getElementById('btn-join').onclick = () => {
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = backToMenu);
 
 document.getElementById('btn-start').onclick = () => {
-  if (!isHost) return;
+  if (!isHost || gameStarted) return;
   // Need at least 2 players for last-one-standing.
   if (players.length < 2) return;
+  gameStarted = true;
   broadcastToAll({ type: 'start' });
   enterGame();
 };
@@ -454,6 +457,14 @@ function tryClaimCode(attempt) {
 }
 
 function acceptIncoming(incoming) {
+  // Reject if game already started.
+  if (gameStarted) {
+    incoming.on('open', () => {
+      try { incoming.send({ type: 'rejected', reason: 'started' }); } catch (e) {}
+      try { incoming.close(); } catch (e) {}
+    });
+    return;
+  }
   // Reject if lobby full.
   if (players.length >= MAX_PLAYERS) {
     incoming.on('open', () => {
@@ -545,6 +556,7 @@ function submitJoin() {
       if (!data) return;
       if (data.type === 'rejected') {
         if (data.reason === 'full') setJoinStatus('That game is full.', 'error');
+        else if (data.reason === 'started') setJoinStatus('That game has already started.', 'error');
         else setJoinStatus('Could not join.', 'error');
         document.getElementById('btn-join-submit').disabled = false;
         try { c.close(); } catch (e) {}
