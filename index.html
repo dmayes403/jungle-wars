@@ -144,6 +144,27 @@
     .code-input { font-size: 26px; }
     .btn { font-size: 16px; padding: 12px 20px; min-width: 130px; }
   }
+
+  #debug-log {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    max-height: 35vh; overflow-y: auto;
+    background: rgba(0,0,0,0.85);
+    color: #8acc6a;
+    font-family: 'Courier New', monospace; font-size: 11px;
+    padding: 8px 12px; padding-bottom: 24px;
+    border-top: 1px solid #4a4a2a;
+    z-index: 999; display: none;
+  }
+  #debug-log.active { display: block; }
+  #debug-log .err { color: #ff7a5a; }
+  #debug-log .info { color: #ffd84a; }
+  #debug-log-toggle {
+    position: fixed; bottom: 4px; right: 8px;
+    background: #333; color: #aaa; border: 1px solid #555;
+    font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    cursor: pointer; z-index: 1000;
+    font-family: monospace;
+  }
 </style>
 </head>
 <body>
@@ -200,6 +221,9 @@
 
 </div>
 
+<button id="debug-log-toggle">debug</button>
+<div id="debug-log"></div>
+
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 'use strict';
@@ -236,6 +260,27 @@ const PEER_OPTS = {
     ],
   },
 };
+
+// ---------- Debug log ----------
+const debugLogEl = document.getElementById('debug-log');
+const debugToggleEl = document.getElementById('debug-log-toggle');
+let debugVisible = false;
+function dlog(msg, kind) {
+  const t = new Date().toLocaleTimeString();
+  const cls = kind ? ` class="${kind}"` : '';
+  debugLogEl.innerHTML += `<div${cls}>[${t}] ${msg}</div>`;
+  debugLogEl.scrollTop = debugLogEl.scrollHeight;
+  console.log('[debug]', msg);
+}
+debugToggleEl.onclick = () => {
+  debugVisible = !debugVisible;
+  debugLogEl.classList.toggle('active', debugVisible);
+};
+// Auto-show on errors so the user sees them.
+window.addEventListener('error', e => {
+  dlog('JS ERROR: ' + (e.message || e), 'err');
+  if (!debugVisible) { debugVisible = true; debugLogEl.classList.add('active'); }
+});
 
 // ---------- DOM ----------
 const screens = {
@@ -460,15 +505,20 @@ function tryClaimCode(attempt) {
   const code = generateCode();
   const peerId = NAMESPACE + code;
   const p = new Peer(peerId, PEER_OPTS);
+  dlog('host: claiming code ' + code + ' (attempt ' + (attempt + 1) + ')', 'info');
   p.on('open', () => {
     peer = p;
     myCode = code;
     hostCodeEl.textContent = code;
-    setHostStatus('Waiting for players to join… (id: ' + peerId + ')');
-    console.log('[host] peer open with id', peerId);
+    setHostStatus('Waiting for players to join…');
+    dlog('host: broker open, id=' + peerId, 'info');
   });
-  p.on('connection', incoming => acceptIncoming(incoming));
+  p.on('connection', incoming => {
+    dlog('host: incoming connection from ' + incoming.peer);
+    acceptIncoming(incoming);
+  });
   p.on('error', err => {
+    dlog('host: peer error type=' + ((err && err.type) || 'unknown'), 'err');
     if (err && err.type === 'unavailable-id') {
       try { p.destroy(); } catch (e) {}
       tryClaimCode(attempt + 1);
@@ -476,7 +526,10 @@ function tryClaimCode(attempt) {
     }
     setHostStatus('Connection error: ' + ((err && err.type) || 'unknown'), 'error');
   });
-  p.on('disconnected', () => setHostStatus('Disconnected from lobby. Reconnecting…', 'error'));
+  p.on('disconnected', () => {
+    dlog('host: disconnected from broker', 'err');
+    setHostStatus('Disconnected from lobby. Reconnecting…', 'error');
+  });
 }
 
 function acceptIncoming(incoming) {
@@ -553,14 +606,17 @@ function submitJoin() {
   setJoinStatus('Connecting…');
   document.getElementById('btn-join-submit').disabled = true;
 
+  dlog('join: creating peer for code ' + code, 'info');
   const p = new Peer(undefined, PEER_OPTS);
   p.on('open', myId => {
     peer = p;
-    console.log('[join] my anon id is', myId, '— connecting to', NAMESPACE + code);
+    dlog('join: broker open, my id=' + myId, 'info');
+    dlog('join: connecting to ' + NAMESPACE + code);
     const c = p.connect(NAMESPACE + code, { reliable: true });
     let opened = false;
     let timeoutId = setTimeout(() => {
       if (!opened) {
+        dlog('join: 15s timeout, no data channel established', 'err');
         setJoinStatus('Couldn\'t reach the host. Ask them for a fresh code and try again.', 'error');
         document.getElementById('btn-join-submit').disabled = false;
         try { c.close(); } catch (e) {}
@@ -572,6 +628,7 @@ function submitJoin() {
       opened = true;
       clearTimeout(timeoutId);
       conns['host'] = c;
+      dlog('join: data channel OPEN to host', 'info');
       setJoinStatus('');
       document.getElementById('btn-join-submit').disabled = false;
     });
@@ -604,7 +661,7 @@ function submitJoin() {
       backToMenu();
     });
     c.on('error', err => {
-      console.error('[join] conn error', err);
+      dlog('join: conn error type=' + ((err && err.type) || 'unknown'), 'err');
       if (!opened) {
         clearTimeout(timeoutId);
         setJoinStatus('Could not reach that game. (' + ((err && err.type) || 'error') + ')', 'error');
@@ -614,7 +671,7 @@ function submitJoin() {
     });
   });
   p.on('error', err => {
-    console.error('[join] peer error', err);
+    dlog('join: peer error type=' + ((err && err.type) || 'unknown'), 'err');
     if (err && err.type === 'peer-unavailable') {
       setJoinStatus('No host with that code is online.', 'error');
     } else {
