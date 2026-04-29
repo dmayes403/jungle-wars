@@ -88,6 +88,25 @@
   }
   .code-input:focus { border-color: #ffd84a; }
 
+  .name-input {
+    font-family: 'Arial', sans-serif;
+    font-size: 18px; font-weight: bold;
+    text-align: center;
+    color: #f0e8d0;
+    background: rgba(0,0,0,0.45);
+    border: 2px solid #8a7a50; border-radius: 6px;
+    padding: 10px 14px;
+    width: 240px; max-width: 90%;
+    outline: none;
+    margin: 8px 0 4px 0;
+  }
+  .name-input:focus { border-color: #ffd84a; }
+  .name-input::placeholder { color: #888; font-weight: normal; }
+  .name-label {
+    font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 1px;
+    margin-top: 6px;
+  }
+
   .status { font-size: 14px; color: #aaa; min-height: 20px; }
   .status.error { color: #ff7a5a; }
   .status.ok { color: #8acc6a; }
@@ -173,6 +192,10 @@
   <div id="screen-menu" class="screen active">
     <h1>Jungle Wars</h1>
     <p class="tagline">4-player jungle showdown · Last commander standing wins</p>
+    <div class="name-label">Your Name</div>
+    <input class="name-input" id="player-name" maxlength="14"
+           placeholder="Type your name" autocomplete="off" spellcheck="false">
+    <p class="status" id="menu-status"></p>
     <div class="row">
       <button class="btn primary" id="btn-host">Host</button>
       <button class="btn" id="btn-join">Join</button>
@@ -321,6 +344,7 @@ function setJoinStatus(text, kind) { setStatus(joinStatusEl, text, kind); }
 let peer = null;
 let isHost = false;
 let myCode = null;
+let myName = '';
 let gameStarted = false;
 // Host: connections keyed by peerId. Join: single conn to host stored at conns['host'].
 let conns = {};
@@ -335,6 +359,40 @@ function generateCode() {
   return code;
 }
 
+// Escape user-supplied text before putting it into HTML.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// Read player name from input, save to device.
+const nameInputEl = document.getElementById('player-name');
+const menuStatusEl = document.getElementById('menu-status');
+const STORAGE_KEY_NAME = 'jungleWarsPlayerName';
+try {
+  const saved = localStorage.getItem(STORAGE_KEY_NAME);
+  if (saved) nameInputEl.value = saved;
+} catch (e) {}
+nameInputEl.addEventListener('input', () => {
+  try { localStorage.setItem(STORAGE_KEY_NAME, nameInputEl.value); } catch (e) {}
+});
+
+function getName() {
+  return (nameInputEl.value || '').trim();
+}
+function requireName() {
+  const n = getName();
+  if (!n) {
+    menuStatusEl.textContent = 'Please type your name first.';
+    menuStatusEl.className = 'status error';
+    nameInputEl.focus();
+    return null;
+  }
+  menuStatusEl.textContent = '';
+  return n;
+}
+
 function renderPlayerList(el, list, mySlot, opts) {
   opts = opts || {};
   // Build a slot-indexed view so empty slots render as "Waiting…"
@@ -347,6 +405,7 @@ function renderPlayerList(el, list, mySlot, opts) {
       const me = p.slot === mySlot ? '<span class="tag">You</span>' : '';
       const hostTag = p.isHost ? '<span class="tag">Host</span>' : '';
       const cpuTag = p.isCPU ? '<span class="tag cpu">CPU</span>' : '';
+      const safeName = escapeHtml(p.name || '');
       let diffEl = '';
       if (p.isCPU) {
         if (opts.canRemoveCPU) {
@@ -368,7 +427,7 @@ function renderPlayerList(el, list, mySlot, opts) {
         : '';
       html += `<div class="row-line">
         <span class="swatch" style="background:${p.color}"></span>
-        <span class="name">${p.name}</span>
+        <span class="name">${safeName}</span>
         ${hostTag}${cpuTag}${me}${diffEl}${removeBtn}
       </div>`;
     } else {
@@ -409,8 +468,16 @@ function backToMenu() {
 }
 
 // ---------- Wiring ----------
-document.getElementById('btn-host').onclick = startHosting;
+document.getElementById('btn-host').onclick = () => {
+  const n = requireName();
+  if (!n) return;
+  myName = n;
+  startHosting();
+};
 document.getElementById('btn-join').onclick = () => {
+  const n = requireName();
+  if (!n) return;
+  myName = n;
   show('join');
   setJoinStatus('');
   joinCodeEl.value = '';
@@ -498,7 +565,7 @@ function startHosting() {
   // Host occupies slot 0.
   players = [{
     slot: 0, peerId: 'self',
-    color: PLAYER_COLORS[0].hex, name: 'Player 1', isHost: true, isCPU: false,
+    color: PLAYER_COLORS[0].hex, name: myName || 'Player 1', isHost: true, isCPU: false,
   }];
   cpuCounter = 0;
   refreshHostUI();
@@ -568,9 +635,12 @@ function acceptIncoming(incoming) {
       return;
     }
     const colorObj = PLAYER_COLORS[slot] || PLAYER_COLORS[PLAYER_COLORS.length - 1];
+    // Name from connection metadata, with fallback + length cap.
+    let joinerName = (incoming.metadata && incoming.metadata.name) || ('Player ' + (slot + 1));
+    joinerName = String(joinerName).trim().slice(0, 14) || ('Player ' + (slot + 1));
     const newPlayer = {
       slot, peerId: incoming.peer,
-      color: colorObj.hex, name: 'Player ' + (slot + 1), isHost: false, isCPU: false,
+      color: colorObj.hex, name: joinerName, isHost: false, isCPU: false,
     };
     players.push(newPlayer);
     players.sort((a, b) => a.slot - b.slot);
@@ -620,7 +690,7 @@ function submitJoin() {
     peer = p;
     dlog('join: broker open, my id=' + myId, 'info');
     dlog('join: connecting to ' + NAMESPACE + code);
-    const c = p.connect(NAMESPACE + code, { reliable: true });
+    const c = p.connect(NAMESPACE + code, { reliable: true, metadata: { name: myName } });
     let opened = false;
     let timeoutId = setTimeout(() => {
       if (!opened) {
