@@ -1092,7 +1092,7 @@ function submitJoin() {
 //   - aoe   : melee but the swing damages every enemy near the target
 const CARDS = [
   { id: 'monkey',  name: 'Monkey Swarm',  cost: 2, icon: '🐒', hp: 4,  dmg: 1, speed: 3,
-    attackType: 'melee',  range: 28,  attackCooldown: 0.55 },
+    attackType: 'melee',  range: 28,  attackCooldown: 0.55, swarmCount: 3 },
   { id: 'snake',   name: 'Snake Archer',  cost: 3, icon: '🐍', hp: 3,  dmg: 3, speed: 2,
     attackType: 'ranged', range: 140, attackCooldown: 1.1 },
   { id: 'warthog', name: 'Warthog',       cost: 4, icon: '🐗', hp: 8,  dmg: 3, speed: 4,
@@ -2008,6 +2008,21 @@ function spawnUnit(card, x, y, ownerSlot) {
   });
 }
 
+// summonCard handles "swarm" cards (multiple units spawn together) by
+// placing card.swarmCount units in a small cluster around (x, y).
+function summonCard(card, x, y, ownerSlot) {
+  const n = card.swarmCount || 1;
+  if (n === 1) { spawnUnit(card, x, y, ownerSlot); return; }
+  // Cluster pattern: one in the center, the rest evenly around it.
+  spawnUnit(card, x, y, ownerSlot);
+  const radius = 18;
+  for (let i = 1; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+    const r = radius + Math.random() * 4;
+    spawnUnit(card, x + Math.cos(a) * r, y + Math.sin(a) * r, ownerSlot);
+  }
+}
+
 function spawnProjectile(u, targetUnit, totemSlot) {
   if (!gameState) return;
   gameState.projectiles.push({
@@ -2243,7 +2258,7 @@ function updateCPU(dt) {
     const tlen = Math.hypot(towardX, towardY);
     const offX = (towardX / tlen) * (60 + Math.random() * 80) + (Math.random() - 0.5) * 40;
     const offY = (towardY / tlen) * (60 + Math.random() * 80) + (Math.random() - 0.5) * 40;
-    spawnUnit(card, pos.x + offX, pos.y + offY, p.slot);
+    summonCard(card, pos.x + offX, pos.y + offY, p.slot);
     gameState.cpuMana[p.slot] -= card.cost;
 
     // Schedule next spawn based on difficulty.
@@ -2340,7 +2355,7 @@ gameCanvas.addEventListener('click', e => {
     spawnFloater(x, y, 'too far!', '#ff7a5a');
     return;
   }
-  spawnUnit(card, x, y, gameState.me.slot);
+  summonCard(card, x, y, gameState.me.slot);
   gameState.mana -= card.cost;
   gameState.selectedCardId = null;
   refreshCardSelection();
