@@ -561,7 +561,7 @@ function submitJoin() {
     let opened = false;
     let timeoutId = setTimeout(() => {
       if (!opened) {
-        setJoinStatus('Host found but connection timed out. Check both devices have internet.', 'error');
+        setJoinStatus('Couldn\'t reach the host. Ask them for a fresh code and try again.', 'error');
         document.getElementById('btn-join-submit').disabled = false;
         try { c.close(); } catch (e) {}
         try { p.destroy(); } catch (e) {}
