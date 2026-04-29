@@ -470,17 +470,9 @@ function escapeHtml(s) {
   }[c]));
 }
 
-// Read player name from input, save to device.
+// Read player name from the input. Cleared on every page refresh.
 const nameInputEl = document.getElementById('player-name');
 const menuStatusEl = document.getElementById('menu-status');
-const STORAGE_KEY_NAME = 'jungleWarsPlayerName';
-try {
-  const saved = localStorage.getItem(STORAGE_KEY_NAME);
-  if (saved) nameInputEl.value = saved;
-} catch (e) {}
-nameInputEl.addEventListener('input', () => {
-  try { localStorage.setItem(STORAGE_KEY_NAME, nameInputEl.value); } catch (e) {}
-});
 
 function getName() {
   return (nameInputEl.value || '').trim();
