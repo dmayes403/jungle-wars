@@ -1029,12 +1029,19 @@ function submitJoin() {
 
 // ---------- Phase 2: Game scene ----------
 
-// Jungle units = cards. Stats are display-only in Phase 2; combat lands in Phase 3.
+// Jungle units = cards. Each one plays differently:
+//   - melee  (default): walk up and hit one target
+//   - ranged: stop at range, fire arrow projectiles at the nearest enemy
+//   - aoe   : melee but the swing damages every enemy near the target
 const CARDS = [
-  { id: 'monkey',  name: 'Monkey Swarm',  cost: 2, icon: '🐒', hp: 4,  dmg: 1, speed: 3 },
-  { id: 'snake',   name: 'Snake Archer',  cost: 3, icon: '🐍', hp: 3,  dmg: 3, speed: 2 },
-  { id: 'warthog', name: 'Warthog',       cost: 4, icon: '🐗', hp: 8,  dmg: 3, speed: 4 },
-  { id: 'gorilla', name: 'Gorilla',       cost: 6, icon: '🦍', hp: 14, dmg: 5, speed: 1 },
+  { id: 'monkey',  name: 'Monkey Swarm',  cost: 2, icon: '🐒', hp: 4,  dmg: 1, speed: 3,
+    attackType: 'melee',  range: 28,  attackCooldown: 0.55 },
+  { id: 'snake',   name: 'Snake Archer',  cost: 3, icon: '🐍', hp: 3,  dmg: 3, speed: 2,
+    attackType: 'ranged', range: 140, attackCooldown: 1.1 },
+  { id: 'warthog', name: 'Warthog',       cost: 4, icon: '🐗', hp: 8,  dmg: 3, speed: 4,
+    attackType: 'melee',  range: 30,  attackCooldown: 0.9 },
+  { id: 'gorilla', name: 'Gorilla',       cost: 6, icon: '🦍', hp: 14, dmg: 5, speed: 1,
+    attackType: 'aoe',    range: 32,  attackCooldown: 1.4, aoeRadius: 55 },
 ];
 
 // Where each player's totem sits (canvas px, 800x600). Slot index = corner.
