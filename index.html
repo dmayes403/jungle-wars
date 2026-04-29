@@ -214,6 +214,29 @@ const PLAYER_COLORS = [
   { hex: '#e0c84a', name: 'Snake Yellow' },
 ];
 
+// PeerJS connection options with explicit ICE servers for reliable NAT traversal.
+// openrelay.metered.ca offers free public TURN as a fallback when STUN alone can't connect.
+const PEER_OPTS = {
+  debug: 2,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
+  },
+};
+
 // ---------- DOM ----------
 const screens = {
   menu: document.getElementById('screen-menu'),
@@ -436,7 +459,7 @@ function tryClaimCode(attempt) {
   }
   const code = generateCode();
   const peerId = NAMESPACE + code;
-  const p = new Peer(peerId, { debug: 2 });
+  const p = new Peer(peerId, PEER_OPTS);
   p.on('open', () => {
     peer = p;
     myCode = code;
@@ -530,7 +553,7 @@ function submitJoin() {
   setJoinStatus('Connecting…');
   document.getElementById('btn-join-submit').disabled = true;
 
-  const p = new Peer(undefined, { debug: 2 });
+  const p = new Peer(undefined, PEER_OPTS);
   p.on('open', myId => {
     peer = p;
     console.log('[join] my anon id is', myId, '— connecting to', NAMESPACE + code);
@@ -538,12 +561,12 @@ function submitJoin() {
     let opened = false;
     let timeoutId = setTimeout(() => {
       if (!opened) {
-        setJoinStatus('No host found for that code.', 'error');
+        setJoinStatus('Host found but connection timed out. Check both devices have internet.', 'error');
         document.getElementById('btn-join-submit').disabled = false;
         try { c.close(); } catch (e) {}
         try { p.destroy(); } catch (e) {}
       }
-    }, 8000);
+    }, 15000);
 
     c.on('open', () => {
       opened = true;
