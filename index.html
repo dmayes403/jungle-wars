@@ -339,9 +339,10 @@
     font-size: 11px; font-weight: bold;
     z-index: 2; position: relative;
   }
-  .card-stats .stat { display: flex; align-items: center; gap: 2px; }
+  .card-stats .stat { display: flex; align-items: center; gap: 3px; }
   .card-stats .hp  { color: #b22020; }
   .card-stats .dmg { color: #5a2a08; }
+  .card-stats .stat svg { display: block; }
   .game-hud-top {
     position: absolute; top: 0; left: 0; right: 0;
     padding: 8px 12px;
@@ -1666,6 +1667,15 @@ function drawTotem(ctx, x, y, color, name, isMe) {
   }
 }
 
+// Single big sword SVG used in card stats (renders the same on every device).
+const SWORD_SVG = `<svg viewBox="0 0 14 16" width="13" height="15" aria-hidden="true">
+  <polygon points="7,1 5,9 9,9" fill="#cfd2dc" stroke="#2a2a36" stroke-width="0.6"/>
+  <polygon points="7,1 7,9 9,9" fill="#9aa0ac"/>
+  <rect x="3" y="9" width="8" height="1.6" fill="#5a3a1a" stroke="#2a1408" stroke-width="0.3"/>
+  <rect x="6" y="10.6" width="2" height="3.2" fill="#3a200a"/>
+  <circle cx="7" cy="14.5" r="1.1" fill="#8a5a28" stroke="#2a1408" stroke-width="0.3"/>
+</svg>`;
+
 function renderCardHand() {
   const handEl = document.getElementById('card-hand');
   let html = '';
@@ -1676,7 +1686,7 @@ function renderCardHand() {
       <div class="card-art"><span class="card-icon">${c.icon}</span></div>
       <div class="card-stats">
         <span class="stat hp">♥ ${c.hp}</span>
-        <span class="stat dmg">⚔ ${c.dmg}</span>
+        <span class="stat dmg">${SWORD_SVG} ${c.dmg}</span>
       </div>
     </div>`;
   }
