@@ -122,6 +122,16 @@
     background: none; border: none;
   }
   .player-list .remove:hover { opacity: 1; }
+  .player-list .diff-select {
+    background: rgba(0,0,0,0.5); color: #f0e8d0;
+    border: 1px solid #5a5a3a; border-radius: 3px;
+    font-family: 'Arial', sans-serif; font-size: 12px;
+    padding: 3px 6px; cursor: pointer;
+  }
+  .player-list .diff-select:focus { outline: none; border-color: #ffd84a; }
+  .player-list .diff-label {
+    font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px;
+  }
 
   canvas { border: 2px solid #2d5a1e; display: block; background: #2d5a1e; }
   #game { max-width: 100%; height: auto; }
@@ -260,13 +270,29 @@ function renderPlayerList(el, list, mySlot, opts) {
       const me = p.slot === mySlot ? '<span class="tag">You</span>' : '';
       const hostTag = p.isHost ? '<span class="tag">Host</span>' : '';
       const cpuTag = p.isCPU ? '<span class="tag cpu">CPU</span>' : '';
+      let diffEl = '';
+      if (p.isCPU) {
+        if (opts.canRemoveCPU) {
+          // Host view: editable dropdown.
+          const cur = p.difficulty || 'normal';
+          diffEl = `<select class="diff-select" data-diff-slot="${p.slot}">
+            <option value="easy"${cur === 'easy' ? ' selected' : ''}>Easy</option>
+            <option value="normal"${cur === 'normal' ? ' selected' : ''}>Normal</option>
+            <option value="hard"${cur === 'hard' ? ' selected' : ''}>Hard</option>
+          </select>`;
+        } else {
+          // Joiner view: read-only label.
+          const labelMap = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+          diffEl = `<span class="diff-label">${labelMap[p.difficulty] || 'Normal'}</span>`;
+        }
+      }
       const removeBtn = (opts.canRemoveCPU && p.isCPU)
         ? `<button class="remove" data-remove-slot="${p.slot}" title="Remove CPU">✕</button>`
         : '';
       html += `<div class="row-line">
         <span class="swatch" style="background:${p.color}"></span>
         <span class="name">${p.name}</span>
-        ${hostTag}${cpuTag}${me}${removeBtn}
+        ${hostTag}${cpuTag}${me}${diffEl}${removeBtn}
       </div>`;
     } else {
       html += `<div class="row-line empty">
@@ -276,10 +302,13 @@ function renderPlayerList(el, list, mySlot, opts) {
     }
   }
   el.innerHTML = html;
-  // Wire up remove buttons (host only).
+  // Wire up host-only controls.
   if (opts.canRemoveCPU) {
     el.querySelectorAll('[data-remove-slot]').forEach(btn => {
       btn.onclick = () => removeCPU(parseInt(btn.dataset.removeSlot, 10));
+    });
+    el.querySelectorAll('[data-diff-slot]').forEach(sel => {
+      sel.onchange = () => setCPUDifficulty(parseInt(sel.dataset.diffSlot, 10), sel.value);
     });
   }
 }
@@ -338,6 +367,7 @@ function addCPU() {
   players.push({
     slot, peerId: 'cpu-' + cpuCounter,
     color: colorObj.hex, name: 'CPU ' + cpuCounter, isHost: false, isCPU: true,
+    difficulty: 'normal',
   });
   players.sort((a, b) => a.slot - b.slot);
   refreshHostUI();
@@ -350,6 +380,16 @@ function removeCPU(slot) {
   players = players.filter(p => !(p.isCPU && p.slot === slot));
   if (players.length === before) return;
   refreshHostUI();
+  broadcastRoster();
+}
+
+function setCPUDifficulty(slot, difficulty) {
+  if (!isHost) return;
+  if (!['easy', 'normal', 'hard'].includes(difficulty)) return;
+  const cpu = players.find(p => p.isCPU && p.slot === slot);
+  if (!cpu) return;
+  cpu.difficulty = difficulty;
+  // No need to re-render full list; the dropdown already reflects the new value.
   broadcastRoster();
 }
 
