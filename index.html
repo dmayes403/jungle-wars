@@ -1114,6 +1114,8 @@ function drawWorld() {
 
   // River
   drawRiver(ctx, W, H, time);
+  // Bridge crosses the river at the middle — units will use this in Phase 3
+  drawBridge(ctx, W, H, time);
 
   // Sort trees by Y so closer (bottom) trees draw on top
   const sortedTrees = trees.slice().sort((a, b) => a.y - b.y);
@@ -1230,6 +1232,131 @@ function drawRiver(ctx, W, H, time) {
     const rx = (i * 47 + 10) % W;
     drawReedTuft(ctx, rx, cy - halfW - 1 + Math.sin(rx * 0.08) * 4, 1);
     drawReedTuft(ctx, rx + 22, cy + halfW + 1 + Math.sin(rx * 0.11) * 4, -1);
+  }
+}
+
+function drawBridge(ctx, W, H, time) {
+  const cx = W / 2, cy = H / 2;
+  const bw = 70;   // east-west width of the bridge deck
+  const bl = 110;  // north-south length, pokes past river banks
+  const x1 = cx - bw / 2, x2 = cx + bw / 2;
+  const y1 = cy - bl / 2, y2 = cy + bl / 2;
+
+  // Soft shadow of the bridge falling on the water
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(cx + 1, cy + 4, bw * 0.78, bl * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Side rails — long wooden beams down each edge
+  ctx.fillStyle = '#5a3614';
+  ctx.fillRect(x1 - 5, y1, 8, bl);
+  ctx.fillRect(x2 - 3, y1, 8, bl);
+  // Rail highlight stripe
+  ctx.fillStyle = '#7c5024';
+  ctx.fillRect(x1 - 5, y1, 1, bl);
+  ctx.fillRect(x2 - 3, y1, 1, bl);
+  // Rail bottom edge shadow
+  ctx.fillStyle = '#2a1606';
+  ctx.fillRect(x1 - 5, y2 - 1, 8, 1);
+  ctx.fillRect(x2 - 3, y2 - 1, 8, 1);
+
+  // Cross-planks
+  const numPlanks = 14;
+  const plankH = bl / numPlanks;
+  const plankColors = ['#8a5224', '#a06a30', '#7a4a1c'];
+  for (let i = 0; i < numPlanks; i++) {
+    const py = y1 + i * plankH;
+    ctx.fillStyle = plankColors[i % 3];
+    ctx.fillRect(x1, py + 0.5, bw, plankH - 0.5);
+    // Gap between planks
+    ctx.fillStyle = 'rgba(40, 22, 6, 0.55)';
+    ctx.fillRect(x1, py + plankH - 1, bw, 0.8);
+    // Subtle wood grain mid-plank
+    ctx.fillStyle = 'rgba(40, 22, 6, 0.18)';
+    ctx.fillRect(x1 + 6 + (i * 13) % 10, py + plankH * 0.4, bw - 12, 0.5);
+    // Tiny nail dots
+    ctx.fillStyle = '#3a200a';
+    ctx.beginPath();
+    ctx.arc(x1 + 4, py + plankH * 0.5, 0.9, 0, Math.PI * 2);
+    ctx.arc(x2 - 4, py + plankH * 0.5, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Top edge highlight (sunlight catching the deck)
+  ctx.fillStyle = 'rgba(255, 220, 160, 0.18)';
+  ctx.fillRect(x1, y1 + 0.5, bw, 1);
+
+  // Posts at four corners
+  ctx.fillStyle = '#3a200a';
+  for (const [px, py] of [
+    [x1 - 6, y1 - 5], [x2 - 4, y1 - 5],
+    [x1 - 6, y2 - 3], [x2 - 4, y2 - 3]
+  ]) {
+    ctx.fillRect(px, py, 10, 10);
+    ctx.fillStyle = '#5a3818';
+    ctx.fillRect(px, py, 10, 1);
+    ctx.fillRect(px, py, 1, 10);
+    ctx.fillStyle = '#3a200a';
+  }
+
+  // Rope handrails — sagging arcs between posts on each side
+  ctx.strokeStyle = '#cda354';
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  // Left rope (with two arcs through a midpoint)
+  ctx.beginPath();
+  ctx.moveTo(x1 - 1, y1);
+  ctx.quadraticCurveTo(x1 - 6, cy - bl / 4, x1 - 1, cy);
+  ctx.quadraticCurveTo(x1 - 6, cy + bl / 4, x1 - 1, y2);
+  ctx.stroke();
+  // Right rope
+  ctx.beginPath();
+  ctx.moveTo(x2 + 1, y1);
+  ctx.quadraticCurveTo(x2 + 6, cy - bl / 4, x2 + 1, cy);
+  ctx.quadraticCurveTo(x2 + 6, cy + bl / 4, x2 + 1, y2);
+  ctx.stroke();
+  // Subtle rope twist highlight
+  ctx.strokeStyle = 'rgba(255, 230, 160, 0.4)';
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(x1 - 1, y1 + 1);
+  ctx.quadraticCurveTo(x1 - 5.5, cy - bl / 4 + 1, x1 - 1, cy + 1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2 + 1, y1 + 1);
+  ctx.quadraticCurveTo(x2 + 5.5, cy - bl / 4 + 1, x2 + 1, cy + 1);
+  ctx.stroke();
+
+  // Decorative vines hanging off corners
+  ctx.strokeStyle = '#2a5a1a';
+  ctx.lineWidth = 1.4;
+  // Top-left vine drooping down toward water
+  ctx.beginPath();
+  ctx.moveTo(x1 - 5, y1 + 4);
+  ctx.bezierCurveTo(x1 - 12, y1 + 18, x1 - 8, y1 + 34, x1 - 14, y1 + 50);
+  ctx.stroke();
+  // Bottom-right vine
+  ctx.beginPath();
+  ctx.moveTo(x2 + 5, y2 - 4);
+  ctx.bezierCurveTo(x2 + 12, y2 - 18, x2 + 8, y2 - 34, x2 + 14, y2 - 50);
+  ctx.stroke();
+  // Vine leaves
+  ctx.fillStyle = '#3a8a2a';
+  for (const [lx, ly, rot] of [
+    [x1 - 10, y1 + 16, -0.4], [x1 - 7, y1 + 30, 0.3], [x1 - 13, y1 + 47, -0.2],
+    [x2 + 10, y2 - 16, 0.4],  [x2 + 7, y2 - 30, -0.3], [x2 + 13, y2 - 47, 0.2],
+  ]) {
+    ctx.beginPath();
+    ctx.ellipse(lx, ly, 4, 2, rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Tiny leaf highlight
+  ctx.fillStyle = 'rgba(160, 230, 120, 0.45)';
+  for (const [lx, ly] of [[x1 - 9, y1 + 15], [x2 + 9, y2 - 15]]) {
+    ctx.beginPath();
+    ctx.arc(lx, ly, 1, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
