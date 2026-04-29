@@ -361,6 +361,16 @@
     border-radius: 50%; vertical-align: middle;
     margin-right: 6px;
   }
+  .game-hud-top .mute-btn {
+    pointer-events: auto; cursor: pointer;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: Arial;
+  }
 
   /* Winner screen overlay */
   #winner-overlay {
@@ -475,6 +485,7 @@
       <div class="game-hud-top">
         <span class="you-tag" id="you-tag"></span>
         <span id="game-info"></span>
+        <button class="mute-btn" id="btn-mute" title="Mute sounds">🔊</button>
       </div>
       <div class="game-overlay">
         <div class="mana-bar">
@@ -734,6 +745,7 @@ document.getElementById('btn-start').onclick = () => {
   if (!isHost || gameStarted) return;
   // Need at least 2 players for last-one-standing.
   if (players.length < 2) return;
+  ensureAudio(); // browsers need a user gesture to unlock audio
   gameStarted = true;
   broadcastToAll({ type: 'start' });
   enterGame();
@@ -1715,6 +1727,103 @@ function refreshCardSelection() {
   });
 }
 
+// ----- Sound effects (Web Audio, all synthesized — no asset files) -----
+
+let audioCtx = null;
+let muted = false;
+let lastClashTime = 0;
+let lastTotemHitTime = 0;
+
+function ensureAudio() {
+  if (!audioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtx = new Ctx();
+    } catch (e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function setMuted(m) {
+  muted = m;
+  const btn = document.getElementById('btn-mute');
+  if (btn) {
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.title = muted ? 'Unmute sounds' : 'Mute sounds';
+  }
+}
+document.getElementById('btn-mute').onclick = () => setMuted(!muted);
+
+function playTone(freq, dur, opts) {
+  if (muted || !audioCtx) return;
+  opts = opts || {};
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = opts.type || 'sine';
+  osc.frequency.setValueAtTime(freq, t0);
+  if (opts.endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(20, opts.endFreq), t0 + dur);
+  const peak = opts.volume != null ? opts.volume : 0.25;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(peak, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.05);
+}
+function playNoiseBurst(dur, filterFreq, volume) {
+  if (muted || !audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const buf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * dur), audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 0.4));
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.value = filterFreq;
+  filt.Q.value = 0.7;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(volume, t0);
+  src.connect(filt).connect(gain).connect(audioCtx.destination);
+  src.start(t0);
+}
+
+function playSummon()    { playTone(440, 0.18, { type: 'sine',     endFreq: 880, volume: 0.22 }); }
+function playSwordClash() {
+  // Rate-limit clashes so 30 simultaneous attacks don't deafen anyone.
+  const now = performance.now();
+  if (now - lastClashTime < 60) return;
+  lastClashTime = now;
+  playNoiseBurst(0.09, 2200, 0.18);
+}
+function playTotemHit() {
+  const now = performance.now();
+  if (now - lastTotemHitTime < 100) return;
+  lastTotemHitTime = now;
+  playTone(140, 0.22, { type: 'sine',     endFreq: 60,  volume: 0.4 });
+  playNoiseBurst(0.12, 220, 0.18);
+}
+function playUnitDeath() { playTone(280, 0.32, { type: 'sawtooth', endFreq: 90,  volume: 0.18 }); }
+function playTotemDeath() {
+  // Big descending boom
+  playTone(180, 0.6, { type: 'sawtooth', endFreq: 50, volume: 0.35 });
+  setTimeout(() => playNoiseBurst(0.4, 180, 0.25), 50);
+}
+function playVictory() {
+  if (muted || !audioCtx) return;
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  notes.forEach((f, i) =>
+    setTimeout(() => playTone(f, 0.32, { type: 'triangle', volume: 0.28 }), i * 110)
+  );
+}
+function playDefeat() {
+  if (muted || !audioCtx) return;
+  const notes = [392, 349.23, 311.13, 261.63];
+  notes.forEach((f, i) =>
+    setTimeout(() => playTone(f, 0.4, { type: 'sawtooth', volume: 0.22 }), i * 180)
+  );
+}
+
 // ----- Phase 3: combat / units / CPU AI -----
 
 function spawnUnit(card, x, y, ownerSlot) {
@@ -1759,6 +1868,7 @@ function updateUnits(dt) {
         nearestEnemy.hp -= u.dmg;
         u.cooldown = ATTACK_COOLDOWN;
         spawnFloater(nearestEnemy.x, nearestEnemy.y - 16, '-' + u.dmg, '#ffd84a');
+        playSwordClash();
       }
     } else if (nearestEnemy && nearestDist <= UNIT_AGGRO_RADIUS) {
       target = { x: nearestEnemy.x, y: nearestEnemy.y };
@@ -1775,9 +1885,12 @@ function updateUnits(dt) {
       if (nt) {
         if (nd <= TOTEM_ATTACK_RADIUS) {
           if (u.cooldown <= 0) {
+            const wasAlive = gameState.totemHp[ntSlot] > 0;
             gameState.totemHp[ntSlot] = Math.max(0, gameState.totemHp[ntSlot] - u.dmg);
             u.cooldown = ATTACK_COOLDOWN;
             spawnFloater(nt.x, nt.y - 30, '-' + u.dmg, '#ff7a5a');
+            if (wasAlive && gameState.totemHp[ntSlot] === 0) playTotemDeath();
+            else playTotemHit();
           }
         } else {
           target = { x: nt.x, y: nt.y };
@@ -1818,10 +1931,12 @@ function updateUnits(dt) {
 
   // Drop dead units + spawn a quick particle effect when they die
   const survivors = [];
+  let deathsThisFrame = 0;
   for (const u of gameState.units) {
     if (u.hp > 0) survivors.push(u);
-    else spawnFloater(u.x, u.y, 'X', '#ff5a4a');
+    else { spawnFloater(u.x, u.y, 'X', '#ff5a4a'); deathsThisFrame++; }
   }
+  if (deathsThisFrame > 0) playUnitDeath();
   gameState.units = survivors;
 }
 
@@ -1884,6 +1999,7 @@ function showWinnerScreen(winner) {
     const isMe = gameState.me && winner.slot === gameState.me.slot;
     title.textContent = isMe ? 'VICTORY!' : 'DEFEAT';
     nameEl.innerHTML = `<span class="swatch" style="background:${winner.color}"></span>${escapeHtml(winner.name)} wins!`;
+    if (isMe) playVictory(); else playDefeat();
   }
   overlay.classList.add('active');
 }
@@ -1926,6 +2042,7 @@ gameCanvas.addEventListener('click', e => {
   gameState.mana -= card.cost;
   gameState.selectedCardId = null;
   refreshCardSelection();
+  playSummon();
 });
 
 // ----- Drawing helpers for combat -----
