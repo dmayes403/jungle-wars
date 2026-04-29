@@ -361,13 +361,69 @@
     border-radius: 50%; vertical-align: middle;
     margin-right: 6px;
   }
-  .game-hud-top .mute-btn {
+  .game-hud-top .mute-btn,
+  .game-hud-top .surrender-btn {
     pointer-events: auto; cursor: pointer;
     background: rgba(0,0,0,0.5);
     border: 1px solid rgba(255,255,255,0.2);
-    padding: 5px 8px;
     border-radius: 4px;
-    line-height: 0;
+    color: #fff;
+  }
+  .game-hud-top .mute-btn {
+    padding: 5px 8px; line-height: 0;
+  }
+  .game-hud-top .surrender-btn {
+    padding: 4px 10px;
+    font-family: Arial;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 6px;
+    color: #ffd0d0;
+    border-color: rgba(255,120,120,0.35);
+    background: rgba(60, 0, 0, 0.45);
+  }
+  .game-hud-top .surrender-btn:hover {
+    background: rgba(120, 30, 30, 0.65);
+    border-color: rgba(255, 160, 160, 0.65);
+    color: #fff;
+  }
+
+  /* Surrender confirm dialog */
+  #confirm-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none; justify-content: center; align-items: center;
+    z-index: 55;
+  }
+  #confirm-overlay.active { display: flex; }
+  .confirm-box {
+    background: linear-gradient(to bottom, #2a3a1a, #16240a);
+    border: 2px solid #8a7a50;
+    border-radius: 8px;
+    padding: 24px 32px;
+    text-align: center;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+    max-width: 90%;
+  }
+  .confirm-title {
+    color: #ffd84a;
+    font-family: Arial;
+    font-size: 22px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    text-shadow: 2px 2px 0 #000;
+  }
+  .confirm-text {
+    color: #f0e8d0;
+    font-family: Arial;
+    font-size: 14px;
+    margin-bottom: 18px;
+    opacity: 0.9;
+  }
+  .confirm-row {
+    display: flex; gap: 12px; justify-content: center;
   }
   .game-hud-top .mute-btn:hover .speaker-body { fill: #fff; }
   .game-hud-top .mute-btn:hover .speaker-wave { stroke: #fff; }
@@ -546,14 +602,17 @@
       <div class="game-hud-top">
         <span class="you-tag" id="you-tag"></span>
         <span id="game-info"></span>
-        <button class="mute-btn" id="btn-mute" title="Mute sounds">
-          <svg class="speaker-svg" id="speaker-svg" viewBox="0 0 22 18">
-            <path class="speaker-body" d="M1 6 L5 6 L11 1 L11 17 L5 12 L1 12 Z"/>
-            <path class="speaker-wave" d="M13.5 6.2 Q15.8 9 13.5 11.8"/>
-            <path class="speaker-wave" d="M15.8 4 Q19.5 9 15.8 14"/>
-            <line class="speaker-slash" x1="12" y1="3" x2="21" y2="15"/>
-          </svg>
-        </button>
+        <span style="display:inline-flex;align-items:center;">
+          <button class="surrender-btn" id="btn-surrender" title="Surrender and return to menu">Surrender</button>
+          <button class="mute-btn" id="btn-mute" title="Mute sounds">
+            <svg class="speaker-svg" id="speaker-svg" viewBox="0 0 22 18">
+              <path class="speaker-body" d="M1 6 L5 6 L11 1 L11 17 L5 12 L1 12 Z"/>
+              <path class="speaker-wave" d="M13.5 6.2 Q15.8 9 13.5 11.8"/>
+              <path class="speaker-wave" d="M15.8 4 Q19.5 9 15.8 14"/>
+              <line class="speaker-slash" x1="12" y1="3" x2="21" y2="15"/>
+            </svg>
+          </button>
+        </span>
       </div>
       <div class="game-overlay">
         <div class="mana-bar">
@@ -564,6 +623,16 @@
       </div>
       <div id="countdown-overlay">
         <div id="countdown-text">3</div>
+      </div>
+      <div id="confirm-overlay">
+        <div class="confirm-box">
+          <div class="confirm-title">Surrender?</div>
+          <div class="confirm-text">Are you sure you want to give up and go back to the menu?</div>
+          <div class="confirm-row">
+            <button class="btn primary" id="btn-confirm-no">No</button>
+            <button class="btn" id="btn-confirm-yes">Yes</button>
+          </div>
+        </div>
       </div>
       <div id="winner-overlay">
         <div id="confetti-layer"></div>
@@ -1925,6 +1994,20 @@ function setMuted(m) {
   if (svg) svg.classList.toggle('muted', muted);
 }
 document.getElementById('btn-mute').onclick = () => setMuted(!muted);
+
+// Surrender button + confirmation dialog.
+const confirmOverlay = document.getElementById('confirm-overlay');
+document.getElementById('btn-surrender').onclick = () => {
+  if (!gameState || !gameState.active) return;
+  confirmOverlay.classList.add('active');
+};
+document.getElementById('btn-confirm-no').onclick = () => {
+  confirmOverlay.classList.remove('active');
+};
+document.getElementById('btn-confirm-yes').onclick = () => {
+  confirmOverlay.classList.remove('active');
+  backToMenu();
+};
 
 function playTone(freq, dur, opts) {
   if (muted || !audioCtx) return;
