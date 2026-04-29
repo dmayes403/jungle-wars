@@ -399,6 +399,59 @@
   }
   #winner-overlay .row { display: flex; gap: 12px; justify-content: center; }
 
+  /* Confetti on victory */
+  #confetti-layer {
+    position: absolute; inset: 0; pointer-events: none;
+    overflow: hidden; z-index: 60;
+  }
+  .confetti {
+    position: absolute; top: -24px;
+    width: 9px; height: 14px;
+    border-radius: 2px;
+    animation-name: confetti-fall;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    will-change: transform, opacity;
+  }
+  @keyframes confetti-fall {
+    0%   { transform: translate3d(0, -24px, 0) rotate(0deg);     opacity: 1; }
+    85%  { opacity: 1; }
+    100% { transform: translate3d(40px, 640px, 0) rotate(720deg); opacity: 0; }
+  }
+
+  /* 3-2-1-FIGHT! countdown */
+  #countdown-overlay {
+    position: absolute; inset: 0;
+    display: none; justify-content: center; align-items: center;
+    pointer-events: none; z-index: 40;
+  }
+  #countdown-overlay.active { display: flex; }
+  #countdown-text {
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-weight: 900;
+    font-size: 140px;
+    color: #ffd84a;
+    text-shadow:
+      4px 4px 0 #000,
+      0 0 30px rgba(255,216,74,0.9),
+      0 0 60px rgba(255,216,74,0.5);
+    transform: scale(1);
+    transition: transform 0.18s ease, opacity 0.18s ease;
+    letter-spacing: 2px;
+  }
+  #countdown-text.fight {
+    color: #5acc4a;
+    font-size: 110px;
+    text-shadow:
+      4px 4px 0 #000,
+      0 0 30px rgba(90,204,74,0.9),
+      0 0 60px rgba(90,204,74,0.5);
+  }
+  #countdown-text.pop {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+
   @media (max-width: 600px) {
     h1 { font-size: 44px; }
     .code-box { font-size: 38px; letter-spacing: 6px; padding: 14px 16px; }
@@ -494,7 +547,11 @@
         </div>
         <div class="card-hand" id="card-hand"></div>
       </div>
+      <div id="countdown-overlay">
+        <div id="countdown-text">3</div>
+      </div>
       <div id="winner-overlay">
+        <div id="confetti-layer"></div>
         <h2 id="winner-title">VICTORY!</h2>
         <div class="winner-name" id="winner-name"></div>
         <div class="row">
@@ -1098,6 +1155,10 @@ function enterGame() {
     cpuTimers: {},
     winner: null,
     floaters: [], // little floating "+5" / "miss" texts
+    countdown: 3.0,         // seconds remaining in the 3-2-1-FIGHT pre-game
+    countdownLastShown: 4,  // tracks which number was last displayed (for sound triggers)
+    shakeTimer: 0,          // seconds of screen shake remaining
+    shakeIntensity: 0,      // peak displacement in pixels
   };
   for (const p of players) {
     gameState.totemHp[p.slot] = TOTEM_MAX_HP;
@@ -1111,6 +1172,10 @@ function enterGame() {
     }
   }
   document.getElementById('winner-overlay').classList.remove('active');
+  document.getElementById('confetti-layer').innerHTML = '';
+  document.getElementById('countdown-overlay').classList.add('active');
+  document.getElementById('countdown-text').textContent = '3';
+  document.getElementById('countdown-text').className = '';
 
   // Generate ground decorations.
   groundDecos = [];
@@ -1144,6 +1209,22 @@ function gameLoop(now) {
   const dt = Math.min(0.1, (now - gameState.lastTickTime) / 1000);
   gameState.lastTickTime = now;
 
+  // Decay screen shake whether we're in countdown or live play.
+  if (gameState.shakeTimer > 0) {
+    gameState.shakeTimer = Math.max(0, gameState.shakeTimer - dt);
+    if (gameState.shakeTimer === 0) gameState.shakeIntensity = 0;
+  }
+
+  if (gameState.countdown > 0) {
+    // Countdown phase: don't update gameplay, just animate the number.
+    gameState.countdown = Math.max(0, gameState.countdown - dt);
+    tickCountdownDisplay();
+    drawWorld();
+    updateManaUI();
+    if (gameState && gameState.active) requestAnimationFrame(gameLoop);
+    return;
+  }
+
   // Mana regen (player + each CPU)
   if (myCanPlay()) gameState.mana = Math.min(MAX_MANA, gameState.mana + MANA_REGEN_PER_SEC * dt);
   for (const p of players) {
@@ -1165,6 +1246,58 @@ function gameLoop(now) {
   if (gameState && gameState.active) requestAnimationFrame(gameLoop);
 }
 
+// ---- Countdown (3 → 2 → 1 → FIGHT! → live) ----
+
+function tickCountdownDisplay() {
+  const overlay = document.getElementById('countdown-overlay');
+  const textEl = document.getElementById('countdown-text');
+  // What number/word should currently be on screen?
+  const t = gameState.countdown;
+  let shown;
+  if (t > 2) shown = 3;
+  else if (t > 1) shown = 2;
+  else if (t > 0) shown = 1;
+  else shown = 0; // "FIGHT!" briefly, then hide
+
+  if (shown !== gameState.countdownLastShown) {
+    gameState.countdownLastShown = shown;
+    if (shown >= 1) {
+      textEl.textContent = String(shown);
+      textEl.className = '';
+      // Restart pop animation
+      void textEl.offsetWidth;
+      requestAnimationFrame(() => textEl.classList.add('pop'));
+      playCountdownTick();
+    } else {
+      // FIGHT!
+      textEl.textContent = 'FIGHT!';
+      textEl.className = 'fight';
+      void textEl.offsetWidth;
+      requestAnimationFrame(() => textEl.classList.add('pop'));
+      playCountdownGo();
+      // Hide overlay after the FIGHT pop finishes (~0.4s)
+      setTimeout(() => overlay.classList.remove('active'), 450);
+      // Reset countdown to 0 so the next gameLoop frame moves to live play.
+      gameState.countdown = 0;
+    }
+  }
+}
+
+function playCountdownTick() {
+  playTone(660, 0.16, { type: 'square', volume: 0.22 });
+}
+function playCountdownGo() {
+  playTone(440, 0.08, { type: 'square',   volume: 0.22 });
+  setTimeout(() => playTone(880, 0.28, { type: 'triangle', volume: 0.32 }), 90);
+}
+
+// ---- Screen shake ----
+function triggerShake(intensity, seconds) {
+  if (!gameState) return;
+  if (intensity > gameState.shakeIntensity) gameState.shakeIntensity = intensity;
+  if (seconds > gameState.shakeTimer) gameState.shakeTimer = seconds;
+}
+
 function myCanPlay() {
   if (!gameState || !gameState.me) return false;
   return gameState.totemHp[gameState.me.slot] > 0;
@@ -1175,6 +1308,15 @@ function drawWorld() {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   const time = (gameState ? gameState.lastTickTime : performance.now()) * 0.001;
+
+  // Apply screen shake by translating the canvas origin a few pixels.
+  ctx.save();
+  if (gameState && gameState.shakeTimer > 0) {
+    const k = gameState.shakeIntensity;
+    const sx = (Math.random() - 0.5) * 2 * k;
+    const sy = (Math.random() - 0.5) * 2 * k;
+    ctx.translate(sx, sy);
+  }
 
   // Jungle floor — layered greens
   const floor = ctx.createLinearGradient(0, 0, 0, H);
@@ -1223,6 +1365,8 @@ function drawWorld() {
     // Floating texts last
     drawFloaters(ctx);
   }
+
+  ctx.restore(); // matches the save() at the top of drawWorld for screen shake
 }
 
 function drawRiver(ctx, W, H, time) {
@@ -1888,6 +2032,7 @@ function dealDamage(victim, dmg) {
   victim.hp -= dmg;
   victim.flashTimer = 0.18;
   spawnFloater(victim.x, victim.y - 16, '-' + dmg, '#ffd84a');
+  triggerShake(1.2, 0.08); // tiny rumble per hit
 }
 
 function updateUnits(dt) {
@@ -2014,8 +2159,13 @@ function performTotemAttack(u, totemPos, ntSlot) {
   gameState.totemHp[ntSlot] = Math.max(0, gameState.totemHp[ntSlot] - u.dmg);
   spawnFloater(totemPos.x, totemPos.y - 30, '-' + u.dmg, '#ff7a5a');
   if (u.attackType === 'aoe') spawnShockwave(totemPos.x, totemPos.y, u.aoeRadius);
-  if (wasAlive && gameState.totemHp[ntSlot] === 0) playTotemDeath();
-  else playTotemHit();
+  if (wasAlive && gameState.totemHp[ntSlot] === 0) {
+    playTotemDeath();
+    triggerShake(14, 0.55);
+  } else {
+    playTotemHit();
+    triggerShake(4, 0.18);
+  }
 }
 
 function updateProjectiles(dt) {
@@ -2042,8 +2192,13 @@ function updateProjectiles(dt) {
         gameState.totemHp[p.totemSlot] = Math.max(0, gameState.totemHp[p.totemSlot] - p.dmg);
         const pos = TOTEM_POSITIONS[p.totemSlot];
         spawnFloater(pos.x, pos.y - 30, '-' + p.dmg, '#ff7a5a');
-        if (wasAlive && gameState.totemHp[p.totemSlot] === 0) playTotemDeath();
-        else playTotemHit();
+        if (wasAlive && gameState.totemHp[p.totemSlot] === 0) {
+          playTotemDeath();
+          triggerShake(14, 0.55);
+        } else {
+          playTotemHit();
+          triggerShake(3, 0.14);
+        }
       }
       p.life = 0;
     } else {
@@ -2112,16 +2267,42 @@ function showWinnerScreen(winner) {
   const overlay = document.getElementById('winner-overlay');
   const title = document.getElementById('winner-title');
   const nameEl = document.getElementById('winner-name');
+  let isMe = false;
   if (!winner) {
     title.textContent = 'DRAW';
     nameEl.innerHTML = 'Nobody made it.';
   } else {
-    const isMe = gameState.me && winner.slot === gameState.me.slot;
+    isMe = gameState.me && winner.slot === gameState.me.slot;
     title.textContent = isMe ? 'VICTORY!' : 'DEFEAT';
     nameEl.innerHTML = `<span class="swatch" style="background:${winner.color}"></span>${escapeHtml(winner.name)} wins!`;
     if (isMe) playVictory(); else playDefeat();
   }
   overlay.classList.add('active');
+  if (winner) spawnConfetti(isMe);
+}
+
+function spawnConfetti(victoryForMe) {
+  const layer = document.getElementById('confetti-layer');
+  layer.innerHTML = '';
+  // Brighter palette when YOU won; muted when you lost.
+  const colors = victoryForMe
+    ? ['#ffd84a', '#ff5a8a', '#5acc4a', '#3a8acc', '#cc4a4a', '#ffffff', '#ff8a3a']
+    : ['#888', '#aaa', '#777'];
+  const count = victoryForMe ? 90 : 40;
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti';
+    el.style.left = (Math.random() * 100) + '%';
+    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+    el.style.animationDelay = (Math.random() * 0.7) + 's';
+    el.style.animationDuration = (2.2 + Math.random() * 1.6) + 's';
+    // Slight per-piece sideways drift via custom transform var (handled by varying width/height/rotation for variety)
+    el.style.width = (6 + Math.random() * 6) + 'px';
+    el.style.height = (10 + Math.random() * 8) + 'px';
+    layer.appendChild(el);
+  }
+  // Clean up the DOM nodes after they're all faded out.
+  setTimeout(() => { if (layer) layer.innerHTML = ''; }, 5500);
 }
 
 document.getElementById('btn-play-again').onclick = () => {
@@ -2143,6 +2324,7 @@ function updateFloaters(dt) {
 const gameCanvas = document.getElementById('game');
 gameCanvas.addEventListener('click', e => {
   if (!gameState || !gameState.active || gameState.winner) return;
+  if (gameState.countdown > 0) return; // can't summon during 3-2-1
   if (!myCanPlay()) return;
   if (!gameState.selectedCardId) return;
   const card = gameState.hand.find(c => c.id === gameState.selectedCardId);
