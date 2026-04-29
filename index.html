@@ -212,7 +212,6 @@
     display: flex; flex-direction: column;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
     touch-action: manipulation;
-    overflow: hidden;
   }
   /* Inner thin frame */
   .card::before {
@@ -270,6 +269,8 @@
     text-transform: uppercase;
     padding: 4px 4px 3px 4px;
     border-bottom: 1.5px solid #2a1408;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
     text-shadow: 1px 1px 0 #000;
     line-height: 1.1;
     z-index: 2; position: relative;
@@ -307,11 +308,11 @@
     filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
     z-index: 2;
   }
-  /* Mana cost gem in the top-right corner */
+  /* Mana cost gem stuck onto the top-right corner of the card */
   .card-cost {
     position: absolute;
-    top: 5px; right: 5px;
-    width: 22px; height: 22px; border-radius: 50%;
+    top: -8px; right: -8px;
+    width: 24px; height: 24px; border-radius: 50%;
     background: radial-gradient(circle at 30% 28%, #9aeaff 0%, #3a8acc 50%, #1a4a8a 100%);
     border: 2px solid #fff;
     box-shadow:
@@ -331,6 +332,8 @@
     display: flex; justify-content: space-around; align-items: center;
     background: linear-gradient(to bottom, rgba(60, 30, 10, 0.15), rgba(60, 30, 10, 0.35));
     border-top: 1.5px solid rgba(60, 30, 10, 0.5);
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
     padding: 4px 2px;
     font-family: 'Arial', sans-serif;
     font-size: 11px; font-weight: bold;
@@ -999,7 +1002,6 @@ const MAX_MANA = 10;
 const MANA_REGEN_PER_SEC = 1; // 1 mana / second to start; tune later.
 
 let gameState = null;
-let trees = []; // decorative trees, generated once per game
 let groundDecos = []; // grass tufts, pebbles, flowers
 
 function enterGame() {
@@ -1028,32 +1030,9 @@ function enterGame() {
     lastTickTime: performance.now(),
   };
 
-  // Generate trees + ground decorations.
-  trees = [];
+  // Generate ground decorations.
   groundDecos = [];
   const reserved = TOTEM_POSITIONS.map(t => ({ x: t.x, y: t.y, r: 75 }));
-  const treeTypes = ['canopy', 'canopy', 'canopy', 'palm', 'bush'];
-  for (let i = 0; i < 32; i++) {
-    let x, y, ok;
-    let tries = 0;
-    do {
-      ok = true;
-      x = 30 + Math.random() * 740;
-      y = 30 + Math.random() * 540;
-      if (Math.abs(y - 300) < 50) ok = false; // keep clear of river
-      for (const r of reserved) {
-        if (Math.hypot(x - r.x, y - r.y) < r.r) { ok = false; break; }
-      }
-      tries++;
-    } while (!ok && tries < 30);
-    if (ok) trees.push({
-      x, y,
-      size: 16 + Math.random() * 12,
-      type: treeTypes[Math.floor(Math.random() * treeTypes.length)],
-      seed: Math.random(),
-    });
-  }
-  // Small ground decorations (grass tufts, pebbles, flowers).
   for (let i = 0; i < 60; i++) {
     let x, y, ok;
     let tries = 0;
@@ -1116,10 +1095,6 @@ function drawWorld() {
   drawRiver(ctx, W, H, time);
   // Bridge crosses the river at the middle — units will use this in Phase 3
   drawBridge(ctx, W, H, time);
-
-  // Sort trees by Y so closer (bottom) trees draw on top
-  const sortedTrees = trees.slice().sort((a, b) => a.y - b.y);
-  for (const t of sortedTrees) drawTree(ctx, t.x, t.y, t.size, t.type, t.seed);
 
   // Totems for every player slot
   for (const p of players) {
@@ -1421,183 +1396,6 @@ function drawGroundDeco(ctx, d, time) {
     ctx.fillStyle = '#cc8030';
     ctx.beginPath();
     ctx.arc(d.x, d.y - 3, 1.1, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function drawTree(ctx, x, y, size, type, seed) {
-  if (type === 'palm') return drawPalm(ctx, x, y, size, seed);
-  if (type === 'bush') return drawBush(ctx, x, y, size, seed);
-  return drawCanopyTree(ctx, x, y, size, seed);
-}
-
-function drawCanopyTree(ctx, x, y, size, seed) {
-  // Drop shadow on the ground
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + 9, size * 0.95, size * 0.28, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Trunk with bark texture
-  ctx.fillStyle = '#4a2a12';
-  ctx.fillRect(x - 3, y - 6, 6, 18);
-  ctx.fillStyle = '#6a4220';
-  ctx.fillRect(x - 3, y - 6, 1, 18);
-  ctx.fillStyle = '#2a1408';
-  ctx.fillRect(x + 1, y - 6, 1, 18);
-  // Bark notches
-  ctx.fillStyle = '#3a200a';
-  ctx.fillRect(x - 2, y, 4, 1);
-  ctx.fillRect(x - 2, y + 6, 4, 1);
-
-  // Layered foliage: dark base, mid, light top
-  ctx.fillStyle = '#1c3e10';
-  ctx.beginPath();
-  ctx.arc(x - size * 0.45, y - 2, size * 0.7, 0, Math.PI * 2);
-  ctx.arc(x + size * 0.45, y - 2, size * 0.7, 0, Math.PI * 2);
-  ctx.arc(x, y - size * 0.5, size * 0.85, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#2a6a22';
-  ctx.beginPath();
-  ctx.arc(x - size * 0.32, y - 4, size * 0.55, 0, Math.PI * 2);
-  ctx.arc(x + size * 0.32, y - 4, size * 0.55, 0, Math.PI * 2);
-  ctx.arc(x, y - size * 0.7, size * 0.65, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#4a9a32';
-  ctx.beginPath();
-  ctx.arc(x - 3, y - size * 0.85, size * 0.4, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Leaf-highlight specks
-  ctx.fillStyle = 'rgba(170,230,110,0.55)';
-  for (let i = 0; i < 5; i++) {
-    const a = (seed * 7 + i * 1.7);
-    const r = size * 0.55;
-    ctx.beginPath();
-    ctx.arc(x + Math.cos(a) * r, y - size * 0.4 + Math.sin(a) * r * 0.6, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function drawPalm(ctx, x, y, size, seed) {
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + 9, size * 0.7, size * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Curved trunk
-  ctx.strokeStyle = '#6a4424';
-  ctx.lineWidth = 4;
-  ctx.lineCap = 'round';
-  const lean = (seed - 0.5) * 6;
-  const topX = x + lean;
-  const topY = y - size * 0.85;
-  ctx.beginPath();
-  ctx.moveTo(x, y + 9);
-  ctx.quadraticCurveTo(x + lean * 0.4, y - size * 0.3, topX, topY);
-  ctx.stroke();
-  // Trunk rings
-  ctx.strokeStyle = '#3a200a';
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 5; i++) {
-    const ty = y + 6 - i * 6;
-    const tx = x + ((ty - y) / (topY - y)) * lean;
-    ctx.beginPath();
-    ctx.moveTo(tx - 3, ty);
-    ctx.lineTo(tx + 3, ty);
-    ctx.stroke();
-  }
-  // Trunk highlight
-  ctx.strokeStyle = '#9a6a40';
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(x - 1, y + 7);
-  ctx.quadraticCurveTo(x + lean * 0.4 - 1, y - size * 0.3, topX - 1, topY);
-  ctx.stroke();
-
-  // Fronds — six elongated leaves spreading out
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI * 2 * i / 6) - Math.PI / 2 + (seed - 0.5) * 0.4;
-    ctx.save();
-    ctx.translate(topX, topY);
-    ctx.rotate(angle);
-    // Frond shadow base
-    ctx.fillStyle = '#1c5018';
-    ctx.beginPath();
-    ctx.ellipse(size * 0.55, 0, size * 0.55, size * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Frond color
-    ctx.fillStyle = '#2a8222';
-    ctx.beginPath();
-    ctx.ellipse(size * 0.5, -1, size * 0.5, size * 0.14, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Spine
-    ctx.strokeStyle = '#1c4a14';
-    ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(size, 0);
-    ctx.stroke();
-    ctx.restore();
-  }
-  // Crown
-  ctx.fillStyle = '#3a9a26';
-  ctx.beginPath();
-  ctx.arc(topX, topY, size * 0.22, 0, Math.PI * 2);
-  ctx.fill();
-  // Coconuts
-  ctx.fillStyle = '#3a200a';
-  ctx.beginPath();
-  ctx.arc(topX - 3, topY + 3, 2, 0, Math.PI * 2);
-  ctx.arc(topX + 3, topY + 4, 2, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawBush(ctx, x, y, size, seed) {
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + 5, size * 0.85, size * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Dark base
-  ctx.fillStyle = '#1c4a14';
-  ctx.beginPath();
-  ctx.arc(x - size * 0.3, y, size * 0.5, 0, Math.PI * 2);
-  ctx.arc(x + size * 0.3, y, size * 0.5, 0, Math.PI * 2);
-  ctx.arc(x, y - size * 0.25, size * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Mid
-  ctx.fillStyle = '#2a7a22';
-  ctx.beginPath();
-  ctx.arc(x - size * 0.2, y - 2, size * 0.4, 0, Math.PI * 2);
-  ctx.arc(x + size * 0.2, y - 2, size * 0.4, 0, Math.PI * 2);
-  ctx.arc(x, y - size * 0.4, size * 0.4, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Top highlight
-  ctx.fillStyle = '#4aa232';
-  ctx.beginPath();
-  ctx.arc(x, y - size * 0.45, size * 0.3, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Optional berries (1 in 3)
-  if (seed < 0.33) {
-    ctx.fillStyle = '#cc3a3a';
-    ctx.beginPath();
-    ctx.arc(x - 4, y - size * 0.2, 1.6, 0, Math.PI * 2);
-    ctx.arc(x + 5, y - size * 0.3, 1.6, 0, Math.PI * 2);
-    ctx.arc(x + 1, y - size * 0.15, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#ff7a5a';
-    ctx.beginPath();
-    ctx.arc(x - 4.5, y - size * 0.22, 0.6, 0, Math.PI * 2);
-    ctx.arc(x + 4.5, y - size * 0.32, 0.6, 0, Math.PI * 2);
-    ctx.arc(x + 0.5, y - size * 0.17, 0.6, 0, Math.PI * 2);
     ctx.fill();
   }
 }
